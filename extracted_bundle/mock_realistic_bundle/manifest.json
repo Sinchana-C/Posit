@@ -3483,6 +3483,9 @@
     "colors_document.Rmd": {
       "checksum": "280f63da399dbc78bbd28265e114ddb5"
     },
+    "example1.rmd": {
+      "checksum": "280f63da399dbc78bbd28265e114ddb5"
+    },
     "data/state_medians.csv": {
       "checksum": "32a72b4919b04e0f59eb34051737fee0"
     },
