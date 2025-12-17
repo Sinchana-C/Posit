@@ -1,234 +1,364 @@
 import os
 import json
 import re
-import tarfile
 import pandas as pd
 from collections import defaultdict
 from dotenv import load_dotenv
-import re
-from collections import defaultdict
 
-load_dotenv()  # reads .env from current directory
+load_dotenv()
 
-# Set paths
-# bundle_path = "realistic_mock_posit_bundle.tar.gz"
 extract_path = os.getenv("EXTRACTED_BUNDLE")
-manifest_filename= os.getenv("MANIFEST_FILENAME")
-rmd_filename=os.getenv("RMD_FILENAME")
-csv_filename=os.getenv("CSV_FILENAME")
-extracted_bundle_foldername=os.getenv("EXTRACTED_BUNDLE_FOLDERNAME")
+manifest_filename = os.getenv("MANIFEST_FILENAME")
+rmd_filename = os.getenv("RMD_FILENAME")
+csv_filename = os.getenv("CSV_FILENAME")
+extracted_bundle_foldername = os.getenv("EXTRACTED_BUNDLE_FOLDERNAME")
 
 os.makedirs(extract_path, exist_ok=True)
 
-# Extract the bundle
-# with tarfile.open(bundle_path, "r:gz") as tar:
-#     tar.extractall(path=extract_path)
+# MANIFEST
 
-# Helper: Read manifest
 def parse_manifest(manifest_path):
-    with open(manifest_path, "r", errors="replace") as f:
+    with open(manifest_path, "r", encoding="utf-8", errors="replace") as f:
         return json.load(f)
 
-# Helper: Parse .Rmd file
+def has_rmd_chunks(lines):
+    return any(line.strip().startswith("```{") for line in lines)
 
-def parse_rmd(rmd_path, page_heading_level=2):
-    """
-    Parse an R Markdown (.Rmd) file and extract metadata about:
-      - YAML header (title, author, date, output)
-      - DB connections
-      - file inputs (read_csv, read.csv, read_excel, etc.)
-      - tables/views (tbl, sql, dbGetQuery)
-      - joins, mutations, summaries, groupings
-      - sections/pages and visuals per section
+def _parse_chunk_options(header):
+    parts = [p.strip() for p in header.split(",")]
+    chunk_name = None
+    opts = {}
 
-    page_heading_level:
-        which heading level to treat as a "page".
-        For example:
-          #   -> level 1
-          ##  -> level 2
-          ### -> level 3
-        Default: 2 (## headings).
-    """
+    if parts:
+        first = re.sub(r"^\s*r\s*", "", parts[0])
+        if first and not re.match(r"^\s*=", first):
+            chunk_name = first.strip()
+
+    for p in parts[1:]:
+        if "=" in p:
+            k, v = p.split("=", 1)
+            opts[k.strip()] = v.strip().strip('"').strip("'")
+        else:
+            opts[p.strip()] = True
+
+    return chunk_name, opts
+
+# R CHUNK PARSER
+def _process_r_chunk(chunk_code, metadata):
+    lines = chunk_code.splitlines()
+    header_line = lines[0]
+
+    header_inside = ""
+    m = re.match(r"^```{\s*r(.*)}", header_line)
+    if m:
+        header_inside = m.group(1).strip().strip(",")
+
+    chunk_name, chunk_opts = _parse_chunk_options(header_inside)
+
+    metadata["chunks"].append({
+        "name": chunk_name,
+        "opts": chunk_opts
+    })
+
+    body = "\n".join(lines[1:])
+    body = re.sub(r"\n```$", "", body)
+
+    # Libraries
+    for pkg in re.findall(r"(?:library|require)\(\s*([A-Za-z0-9_.:]+)\s*\)", body):
+        metadata["libraries"].append(pkg)
+
+    # File reads
+    for m in re.finditer(r"(read[_\.]csv|readr::read_csv|readxl::read_excel)\((.*?)\)", body, re.DOTALL):
+        arg = m.group(2)
+        literal = re.search(r'["\']([^"\']+)["\']', arg)
+        metadata["file_inputs"].append({
+            "call": m.group(1),
+            "path": literal.group(1) if literal else None,
+            "raw": arg
+        })
+
+    # Tables / queries
+    for t in re.finditer(r"\b(tbl|sql|dbGetQuery)\((.*?)\)", body, re.DOTALL):
+        metadata["tables_views"].append(t.group(0))
+
+    # ---------- CALCULATED / DERIVED COLUMNS ----------
+    for m in re.finditer(
+        r"\b("
+        r"mutate|transmute|across|if_else|ifelse|case_when|"
+        r"coalesce|replace_na|rename|"
+        r"lag|lead|row_number|rank|dense_rank|"
+        r"cumsum|cummean|cummax|cummin|"
+        r"as\.numeric|as\.integer|as\.character|as\.Date|"
+        r"ymd|mdy|dmy"
+        r")\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata["calculated_columns"].append(m.group(0).strip())
+
+
+    # ---------- FILTERS / ROW OPERATIONS ----------
+    for f in re.finditer(
+        r"\b("
+        r"filter|slice|slice_head|slice_tail|"
+        r"distinct|arrange"
+        r")\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata.setdefault("filters", []).append(f.group(0).strip())
+
+
+    # ---------- AGGREGATIONS / MEASURES ----------
+    for s in re.finditer(
+        r"\b("
+        r"summarise|summarize|count|tally"
+        r")\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata["measures"].append(s.group(0).strip())
+
+
+    # ---------- GROUPING / HIERARCHIES ----------
+    for g in re.finditer(
+        r"\bgroup_by\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata["hierarchies"].append(g.group(0).strip())
+
+
+    # ---------- JOINS (TIDYVERSE + BASE R) ----------
+    for j in re.finditer(
+        r"\b("
+        r"left_join|right_join|inner_join|full_join|merge"
+        r")\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata["joins"].append(j.group(0).strip())
+
+    for g in re.finditer(
+        r"""
+        ggplot\s*\(
+        [\s\S]*?(?=\n\s*\n
+            | \n\s*}
+            | \n\s*[A-Za-z_][A-Za-z0-9_]*\s*<-
+            | \n\s*```
+            | \Z
+        )
+        """,body,re.VERBOSE):
+        metadata["visuals"].append({
+            "type": "ggplot",
+            "snippet": g.group(0).strip(),
+        })
+    # Visuals
+
+    for g in re.finditer(
+        r"""
+        ggplot\s*\(
+        [\s\S]*?(?=\n\s*\n
+            | \n\s*}
+            | \n\s*[A-Za-z_][A-Za-z0-9_]*\s*<-
+            | \n\s*```
+            | \Z
+        )
+        """,body,re.VERBOSE):
+        metadata["visuals"].append({
+            "type": "ggplot",
+            "snippet": g.group(0).strip(),
+            "chunk": chunk_name if chunk_name else "__plain_code__"
+        })
+
+
+#plain code parser / lines
+def process_plain_code(lines, metadata):
+    body = "\n".join(lines)
+
+    metadata["chunks"].append({
+        "name": "__plain_code__",
+        "opts": {}
+    })
+
+    for pkg in re.findall(r"(?:library|require)\(\s*([A-Za-z0-9_.:]+)\s*\)", body):
+        metadata["libraries"].append(pkg)
+
+    for m in re.finditer(r"(read[_\.]csv|readr::read_csv|readxl::read_excel)\((.*?)\)", body, re.DOTALL):
+        arg = m.group(2)
+        literal = re.search(r'["\']([^"\']+)["\']', arg)
+        metadata["file_inputs"].append({
+            "call": m.group(1),
+            "path": literal.group(1) if literal else None,
+            "raw": arg
+        })
+    
+    # ---------- CALCULATED / DERIVED COLUMNS ----------
+    for m in re.finditer(
+        r"\b("
+        r"mutate|transmute|across|if_else|ifelse|case_when|"
+        r"coalesce|replace_na|rename|"
+        r"lag|lead|row_number|rank|dense_rank|"
+        r"cumsum|cummean|cummax|cummin|"
+        r"as\.numeric|as\.integer|as\.character|as\.Date|"
+        r"ymd|mdy|dmy"
+        r")\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata["calculated_columns"].append(m.group(0).strip())
+
+
+    # ---------- FILTERS / ROW OPERATIONS ----------
+    for f in re.finditer(
+        r"\b("
+        r"filter|slice|slice_head|slice_tail|"
+        r"distinct|arrange"
+        r")\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata.setdefault("filters", []).append(f.group(0).strip())
+
+
+    # ---------- AGGREGATIONS / MEASURES ----------
+    for s in re.finditer(
+        r"\b("
+        r"summarise|summarize|count|tally"
+        r")\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata["measures"].append(s.group(0).strip())
+
+
+    # ---------- GROUPING / HIERARCHIES ----------
+    for g in re.finditer(
+        r"\bgroup_by\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata["hierarchies"].append(g.group(0).strip())
+
+
+    # ---------- JOINS (TIDYVERSE + BASE R) ----------
+    for j in re.finditer(
+        r"\b("
+        r"left_join|right_join|inner_join|full_join|merge"
+        r")\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata["joins"].append(j.group(0).strip())
+
+    for g in re.finditer(
+        r"""
+        ggplot\s*\(
+        [\s\S]*?(?=\n\s*\n
+            | \n\s*}
+            | \n\s*[A-Za-z_][A-Za-z0-9_]*\s*<-
+            | \n\s*```
+            | \Z
+        )
+        """,body,re.VERBOSE):
+        metadata["visuals"].append({
+            "type": "ggplot",
+            "snippet": g.group(0).strip(),
+        })
+
+def parse_rmd(rmd_path):
     metadata = defaultdict(list)
+
+    for k in [
+        "chunks",
+        "libraries",
+        "file_inputs",
+        "tables_views",
+        "joins",
+        "calculated_columns",
+        "measures",
+        "hierarchies",
+        "visuals"
+    ]:
+        metadata[k] = []
 
     with open(rmd_path, "r", encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
 
-    # --------- 1. Parse YAML header ---------
-    yaml = {}
-    if lines and lines[0].strip() == "---":
-        yaml_lines = []
-        # find closing '---'
-        for i in range(1, len(lines)):
-            if lines[i].strip() == "---":
-                # YAML is between line 1 and i-1
-                yaml_lines = lines[1:i]
-                # remaining content starts after this
-                body_lines = lines[i+1:]
-                break
-        else:
-            # no closing --- found; treat entire file as body
-            body_lines = lines
-    else:
-        body_lines = lines
+    if not has_rmd_chunks(lines):
+        process_plain_code(lines, metadata)
+        return dict(metadata)
 
-    # very simple YAML parser (good enough for standard Rmd headers)
-    for yline in yaml_lines:
-        ystrip = yline.strip()
-        if not ystrip or ystrip.startswith("#"):
-            continue
-        if ":" in ystrip:
-            key, value = ystrip.split(":", 1)
-            yaml[key.strip()] = value.strip().strip('"').strip("'")
-
-    metadata["yaml"] = yaml
-
-    # --------- 2. Walk through body, track sections & visuals ---------
-    page_count = 0
-    visuals_per_page = []
-    current_page_visuals = 0
-
-    # Track whether we're inside an R chunk (```{r ...} ... ```)
-    in_r_chunk = False
-    current_chunk_lines = []
-
-    # Regex helpers
-    heading_pattern = re.compile(r"^(#+)\s+(.*)")
-    dbconnect_pattern = re.compile(r"dbConnect\((.*?)\)")
-    file_read_patterns = [
-        re.compile(r"read[_\.]csv\((.*?)\)"),
-        re.compile(r"read[_\.]excel\((.*?)\)"),
-        re.compile(r"readr::read_csv\((.*?)\)"),
-    ]
-    visual_markers = ["ggplot(", "plot_ly(", "renderPlot", "renderTable", "geom_", "qplot("]
-
-    for raw_line in body_lines:
-        stripped = raw_line.strip()
-
-        # --- Detect chunk start/end ---
-        if stripped.startswith("```{r"):
-            in_r_chunk = True
-            current_chunk_lines = [stripped]
-            continue
-        elif stripped == "```" and in_r_chunk:
-            # End of R chunk – process collected chunk
-            chunk_code = "\n".join(current_chunk_lines)
-            _process_r_chunk(chunk_code, metadata, dbconnect_pattern, file_read_patterns)
-            in_r_chunk = False
-            current_chunk_lines = []
-            continue
-
-        if in_r_chunk:
-            current_chunk_lines.append(stripped)
-
-        # --- Headings / "pages" ---
-        m = heading_pattern.match(stripped)
-        if m:
-            hashes, title = m.groups()
-            level = len(hashes)
-            # Record any ongoing page visual count
-            if level == page_heading_level:
-                if page_count > 0:
-                    visuals_per_page.append(current_page_visuals)
-                page_count += 1
-                current_page_visuals = 0
-            # Store all headings if you want later:
-            metadata["headings"].append({"level": level, "title": title})
-            continue
-
-        # --- Visuals (also count visuals outside chunks, e.g. inline) ---
-        if any(marker in stripped for marker in visual_markers):
-            current_page_visuals += 1
-            metadata["visuals"].append(stripped)
-
-        # --- Line-level patterns (joins, mutate, etc.) ---
-        if any(j in stripped for j in ["left_join", "right_join", "inner_join", "full_join"]):
-            metadata["joins"].append(stripped)
-
-        if "mutate(" in stripped:
-            metadata["calculated_columns"].append(stripped)
-
-        if "summarise(" in stripped or "summarize(" in stripped:
-            metadata["measures"].append(stripped)
-
-        if "group_by(" in stripped:
-            metadata["hierarchies"].append(stripped)
-
-        if "tbl(" in stripped or "sql(" in stripped or "dbGetQuery(" in stripped:
-            metadata["tables_views"].append(stripped)
-
-    # End of file: close last page visual count
-    if page_count > 0:
-        visuals_per_page.append(current_page_visuals)
-
-    metadata["page_count"] = page_count
-    metadata["visuals_per_page"] = visuals_per_page
-
-    return dict(metadata)
-
-def _process_r_chunk(chunk_code, metadata, dbconnect_pattern, file_read_patterns):
-    """
-    Helper to process R chunk code and update metadata dict in-place.
-    """
-    lines = chunk_code.splitlines()
+    in_chunk = False
+    current_chunk = []
 
     for line in lines:
         stripped = line.strip()
 
-       # DB connections (e.g. con <- dbConnect(RPostgres::Postgres(), ...))
-        if "dbConnect(" in stripped:
-            metadata["connection_type"].append("dbConnect")
-            conn_match = dbconnect_pattern.search(stripped)
-            if conn_match:
-                metadata["connection_raw"].append(conn_match.group(1))
+        if stripped.startswith("```{") and "r" in stripped:
+            in_chunk = True
+            current_chunk = [stripped]
+            continue
 
-        # File reads
-        for pat in file_read_patterns:
-            if pat.search(stripped):
-                metadata["file_inputs"].append(stripped)
-                
-# Helper: Analyze CSV for column info
+        if stripped == "```" and in_chunk:
+            current_chunk.append(stripped)
+            _process_r_chunk("\n".join(current_chunk), metadata)
+            in_chunk = False
+            current_chunk = []
+            continue
+
+        if in_chunk:
+            current_chunk.append(stripped)
+
+    if not metadata["chunks"]:
+        process_plain_code(lines, metadata)
+
+    return dict(metadata)
+
+# CSV ANALYSIS
+
 def analyze_csv(csv_path):
     df = pd.read_csv(csv_path)
-    col_meta = []
+    return [
+        {
+            "column_name": c,
+            "data_type": str(df[c].dtype),
+            "max_length": int(df[c].astype(str).str.len().max())
+        }
+        for c in df.columns
+    ]
 
-    for col in df.columns:
-        dtype = str(df[col].dtype)
-        max_len = df[col].astype(str).str.len().max()
-        col_meta.append({
-            "column_name": col,
-            "data_type": dtype,
-            "max_length": int(max_len) if not pd.isna(max_len) else None
-        })
-    return col_meta
 
-# Paths
-manifest_path = os.path.join(extract_path, "mock_realistic_bundle",manifest_filename)
-rmd_path = os.path.join(extract_path, "mock_realistic_bundle",rmd_filename)
-csv_path = os.path.join(extract_path, "mock_realistic_bundle", "data", csv_filename)
+manifest_path = os.path.join(
+    extract_path,
+    extracted_bundle_foldername,
+    manifest_filename
+)
 
-# Parse all
+rmd_path = os.path.join(
+    extract_path,
+    extracted_bundle_foldername,
+    rmd_filename
+)
+
+csv_path = os.path.join(
+    extract_path,
+    extracted_bundle_foldername,
+    "data",
+    csv_filename
+)
+
 manifest_data = parse_manifest(manifest_path)
 rmd_metadata = parse_rmd(rmd_path)
-csv_columns = analyze_csv(csv_path)
+csv_metadata = analyze_csv(csv_path)
 
-
-# Combine result
 final_metadata = {
     "manifest": manifest_data,
-    "report_rmd_metadata": rmd_metadata,
-    "csv_column_metadata": csv_columns
+    "report_metadata": rmd_metadata,
+    "csv_column_metadata": csv_metadata
 }
 
-def extract_file_list_from_manifest(manifest_data):
-    files = manifest_data.get("files", {})
-    print(list(files.keys()))
-
-extract_file_list_from_manifest(manifest_data)
-# Save to JSON
-output_json_path = "final_metadata_output.json"
-with open(output_json_path, "w", encoding="utf-8") as f:
+with open("final_metadata_output.json", "w", encoding="utf-8") as f:
     json.dump(final_metadata, f, indent=2)
-    print("CREATED : final_metadata_output.json ")
 
-output_json_path
+print("CREATED: final_metadata_output.json")

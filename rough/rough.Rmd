@@ -1,15 +1,6 @@
----
-title: "Viridis Color Palettes"
-author: "Connect Cloud Author"
-date: "`r Sys.Date()`"
-output: html_document
----
-
 ```{r setup, include = FALSE}
-# Set global knit options (optional)
 knitr::opts_chunk$set(echo = FALSE)
 
-# load packages
 library(tidyverse)
 library(viridis)
 library(here)
@@ -20,8 +11,6 @@ states_map <-
   map_data("state") |> 
   left_join(read_csv(here("data/state_medians.csv")))
 
-#' Create a map of median high temperatures (F) colored 
-#' with a viridis color palette.
 plot_temps <- function(palette = c("magma",
                                    "inferno",
                                    "plasma", 
@@ -62,30 +51,6 @@ plot_temps <- function(palette = c("magma",
       fill = ""
     )
 }
-```
-
-## Viridis
-
-The [viridis](https://sjmgarnier.github.io/viridis/) package provides eight eye-catching color palettes to use in data visualizations:
-
-- magma
-- inferno
-- plasma
-- viridis
-- cividis
-- rocket
-- mako
-- turbo
-
-## Optimized for perception
-
-According to the virids documentation, the palettes:
-
-> are designed to improve graph readability for readers with common forms of color blindness and/or color vision deficiency. The color maps are also perceptually-uniform, both in regular form and also when converted to black-and-white for printing.
-
-## Viridis in action
-
-Each plot uses a different viridis color palette to visualize the median high temperature (F) by US county.
 
 ```{r fig.show="hold", fig.width = 5, out.width="50%"}
 plot_temps("magma")
@@ -106,9 +71,6 @@ plot_temps("rocket")
 plot_temps("mako")
 plot_temps("turbo")
 ```
-## Usage
-
-To use a viridis palette in your plot, include `scale_*_viridis()` in your ggplot2 call:
 
 ```{r eval = FALSE, echo = TRUE}
 mpg |>  
