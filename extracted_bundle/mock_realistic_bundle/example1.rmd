@@ -1,0 +1,14 @@
+library(dplyr)
+library(ggplot2)
+library(readr)
+
+sales <- read_csv("data/sales.csv")
+products <- read_csv("data/products.csv")
+
+data <- left_join(sales, products, by = "product_id")
+
+data |> 
+  group_by(region) |> 
+  summarise(total_sales = sum(amount)) |> 
+  ggplot(aes(region, total_sales)) +
+  geom_col()

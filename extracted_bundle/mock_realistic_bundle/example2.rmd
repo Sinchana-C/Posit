@@ -1,0 +1,67 @@
+```{r}
+library(DBI)
+library(dplyr)
+
+con <- dbConnect(
+  RPostgres::Postgres(),
+  dbname = "finance",
+  host = "localhost",
+  user = "admin"
+)
+
+loans <- tbl(con, "loan_table")
+
+summary <- loans |>
+  group_by(status) |>
+  summarise(total = sum(balance))
+
+
+```{r}
+library(ggplot2)
+library(readr)
+
+df <- read_csv("data/metrics.csv")
+
+plot_metric <- function(metric) {
+  df |> 
+    ggplot(aes(x = date, y = .data[[metric]])) +
+    geom_line()
+}
+
+
+```{r eval = FALSE, echo = TRUE}
+library(dplyr)
+
+example <- tibble(
+  x = 1:5,
+  y = c(2, 4, 6, 8, 10)
+)
+
+example |> 
+  mutate(z = y * 2) |> 
+  summarise(avg = mean(z))
+
+```{r}
+library(dplyr)
+
+a <- data.frame(id = 1:5, x = rnorm(5))
+b <- data.frame(id = 1:5, y = rnorm(5))
+
+c <- merge(a, b, by = "id")
+
+plot(c$x, c$y)
+
+library(dplyr)
+library(ggplot2)
+library(readr)
+
+sales <- read_csv("data/sales.csv")
+products <- read_csv("data/products.csv")
+
+data <- left_join(sales, products, by = "product_id")
+
+data |> 
+  group_by(region) |> 
+  summarise(total_sales = sum(amount)) |> 
+  ggplot(aes(region, total_sales)) +
+  geom_col()
