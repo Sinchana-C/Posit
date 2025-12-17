@@ -7,6 +7,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# below for posit environment
+# load_dotenv(dotenv_path=".env", override=False)
+
 extract_path = os.getenv("EXTRACTED_BUNDLE")
 manifest_filename = os.getenv("MANIFEST_FILENAME")
 rmd_filename = os.getenv("RMD_FILENAME")
@@ -38,7 +41,6 @@ def extract_files_from_manifest(manifest_data):
                 files.add(f["path"])
 
     return sorted(files)
-
 
 def filter_r_sources(file_paths):
     return [
@@ -383,17 +385,17 @@ for rel_path in r_source_files:
         extracted_bundle_foldername,
         rel_path
     )
+    print(abs_path)
 
     if not os.path.exists(abs_path):
         continue
 
-    # reuse YOUR existing parser unchanged
     all_rmd_metadata[rel_path] = parse_rmd(abs_path)
 
-print("---")
-print(all_files)
-print("---")
-# CSV stays as-is
+# print("---")
+# print(all_files)
+# print("---")
+
 csv_metadata = analyze_csv(csv_path)
 
 final_metadata = {
