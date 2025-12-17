@@ -3484,6 +3484,9 @@
       "colors_document.Rmd": {
         "checksum": "280f63da399dbc78bbd28265e114ddb5"
       },
+      "example1.rmd": {
+        "checksum": "280f63da399dbc78bbd28265e114ddb5"
+      },
       "data/state_medians.csv": {
         "checksum": "32a72b4919b04e0f59eb34051737fee0"
       },
@@ -3494,91 +3497,135 @@
     "users": null
   },
   "report_metadata": {
-    "chunks": [
-      {
-        "name": "setup",
-        "opts": {
-          "include": "FALSE"
+    "colors_document.Rmd": {
+      "chunks": [
+        {
+          "name": "setup",
+          "opts": {
+            "include": "FALSE"
+          }
+        },
+        {
+          "name": "fig.show=\"hold\"",
+          "opts": {
+            "fig.width": "5",
+            "out.width": "50%"
+          }
+        },
+        {
+          "name": "fig.show=\"hold\"",
+          "opts": {
+            "fig.width": "5",
+            "out.width": "50%"
+          }
+        },
+        {
+          "name": "fig.show=\"hold\"",
+          "opts": {
+            "fig.width": "5",
+            "out.width": "50%"
+          }
+        },
+        {
+          "name": "fig.show=\"hold\"",
+          "opts": {
+            "fig.width": "5",
+            "out.width": "50%"
+          }
+        },
+        {
+          "name": "eval = FALSE",
+          "opts": {
+            "echo": "TRUE"
+          }
         }
-      },
-      {
-        "name": "fig.show=\"hold\"",
-        "opts": {
-          "fig.width": "5",
-          "out.width": "50%"
+      ],
+      "libraries": [
+        "tidyverse",
+        "viridis",
+        "here",
+        "maps",
+        "sf"
+      ],
+      "file_inputs": [
+        {
+          "call": "read_csv",
+          "path": "data/state_medians.csv",
+          "raw": "here(\"data/state_medians.csv\""
         }
-      },
-      {
-        "name": "fig.show=\"hold\"",
-        "opts": {
-          "fig.width": "5",
-          "out.width": "50%"
+      ],
+      "tables_views": [],
+      "joins": [
+        "left_join(read_csv(here(\"data/state_medians.csv\")"
+      ],
+      "calculated_columns": [
+        "if_else(\ntitle,\nstr_to_title(palette)"
+      ],
+      "measures": [],
+      "hierarchies": [],
+      "visuals": [
+        {
+          "type": "ggplot",
+          "snippet": "ggplot(aes(x = long, y = lat, fill = med_high, group = group)) +\ngeom_polygon(color = \"white\", linewidth = 0.3) +\nscale_fill_viridis(option = palette_code) +\ncoord_sf(\ncrs = 5070, default_crs = 4326,\nxlim = c(-125, -70), ylim = c(25, 52)\n) +\ntheme_void() +\nlabs(\ntitle = if_else(\ntitle,\nstr_to_title(palette),\n\"Median high temperature (F)\"\n),\nfill = \"\"\n)"
+        },
+        {
+          "type": "ggplot",
+          "snippet": "ggplot(aes(x = long, y = lat, fill = med_high, group = group)) +\ngeom_polygon(color = \"white\", linewidth = 0.3) +\nscale_fill_viridis(option = palette_code) +\ncoord_sf(\ncrs = 5070, default_crs = 4326,\nxlim = c(-125, -70), ylim = c(25, 52)\n) +\ntheme_void() +\nlabs(\ntitle = if_else(\ntitle,\nstr_to_title(palette),\n\"Median high temperature (F)\"\n),\nfill = \"\"\n)",
+          "chunk": "setup"
+        },
+        {
+          "type": "ggplot",
+          "snippet": "ggplot(aes(x = displ, y = cty, color = hwy)) +\ngeom_point() +\nscale_color_viridis(option = \"A\")"
+        },
+        {
+          "type": "ggplot",
+          "snippet": "ggplot(aes(x = displ, y = cty, color = hwy)) +\ngeom_point() +\nscale_color_viridis(option = \"A\")",
+          "chunk": "eval = FALSE"
         }
-      },
-      {
-        "name": "fig.show=\"hold\"",
-        "opts": {
-          "fig.width": "5",
-          "out.width": "50%"
+      ]
+    },
+    "example1.rmd": {
+      "chunks": [
+        {
+          "name": "__plain_code__",
+          "opts": {}
         }
-      },
-      {
-        "name": "fig.show=\"hold\"",
-        "opts": {
-          "fig.width": "5",
-          "out.width": "50%"
+      ],
+      "libraries": [
+        "dplyr",
+        "ggplot2",
+        "readr"
+      ],
+      "file_inputs": [
+        {
+          "call": "read_csv",
+          "path": "data/sales.csv",
+          "raw": "\"data/sales.csv\""
+        },
+        {
+          "call": "read_csv",
+          "path": "data/products.csv",
+          "raw": "\"data/products.csv\""
         }
-      },
-      {
-        "name": "eval = FALSE",
-        "opts": {
-          "echo": "TRUE"
+      ],
+      "tables_views": [],
+      "joins": [
+        "left_join(sales, products, by = \"product_id\")"
+      ],
+      "calculated_columns": [],
+      "measures": [
+        "summarise(total_sales = sum(amount)"
+      ],
+      "hierarchies": [
+        "group_by(region)"
+      ],
+      "visuals": [
+        {
+          "type": "ggplot",
+          "snippet": "ggplot(aes(region, total_sales)) +"
         }
-      }
-    ],
-    "libraries": [
-      "tidyverse",
-      "viridis",
-      "here",
-      "maps",
-      "sf"
-    ],
-    "file_inputs": [
-      {
-        "call": "read_csv",
-        "path": "data/state_medians.csv",
-        "raw": "here(\"data/state_medians.csv\""
-      }
-    ],
-    "tables_views": [],
-    "joins": [
-      "left_join(read_csv(here(\"data/state_medians.csv\")"
-    ],
-    "calculated_columns": [
-      "if_else(\ntitle,\nstr_to_title(palette)"
-    ],
-    "measures": [],
-    "hierarchies": [],
-    "visuals": [
-      {
-        "type": "ggplot",
-        "snippet": "ggplot(aes(x = long, y = lat, fill = med_high, group = group)) +\ngeom_polygon(color = \"white\", linewidth = 0.3) +\nscale_fill_viridis(option = palette_code) +\ncoord_sf(\ncrs = 5070, default_crs = 4326,\nxlim = c(-125, -70), ylim = c(25, 52)\n) +\ntheme_void() +\nlabs(\ntitle = if_else(\ntitle,\nstr_to_title(palette),\n\"Median high temperature (F)\"\n),\nfill = \"\"\n)"
-      },
-      {
-        "type": "ggplot",
-        "snippet": "ggplot(aes(x = long, y = lat, fill = med_high, group = group)) +\ngeom_polygon(color = \"white\", linewidth = 0.3) +\nscale_fill_viridis(option = palette_code) +\ncoord_sf(\ncrs = 5070, default_crs = 4326,\nxlim = c(-125, -70), ylim = c(25, 52)\n) +\ntheme_void() +\nlabs(\ntitle = if_else(\ntitle,\nstr_to_title(palette),\n\"Median high temperature (F)\"\n),\nfill = \"\"\n)",
-        "chunk": "setup"
-      },
-      {
-        "type": "ggplot",
-        "snippet": "ggplot(aes(x = displ, y = cty, color = hwy)) +\ngeom_point() +\nscale_color_viridis(option = \"A\")"
-      },
-      {
-        "type": "ggplot",
-        "snippet": "ggplot(aes(x = displ, y = cty, color = hwy)) +\ngeom_point() +\nscale_color_viridis(option = \"A\")",
-        "chunk": "eval = FALSE"
-      }
-    ]
+      ]
+    }
   },
   "csv_column_metadata": [
     {

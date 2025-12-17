@@ -21,6 +21,31 @@ def parse_manifest(manifest_path):
     with open(manifest_path, "r", encoding="utf-8", errors="replace") as f:
         return json.load(f)
 
+def extract_files_from_manifest(manifest_data):
+    files = set()
+
+    if "files" in manifest_data:
+        if isinstance(manifest_data["files"], dict):
+            files.update(manifest_data["files"].keys())
+        elif isinstance(manifest_data["files"], list):
+            for f in manifest_data["files"]:
+                if isinstance(f, dict) and "path" in f:
+                    files.add(f["path"])
+
+    if "content" in manifest_data and "files" in manifest_data["content"]:
+        for f in manifest_data["content"]["files"]:
+            if "path" in f:
+                files.add(f["path"])
+
+    return sorted(files)
+
+
+def filter_r_sources(file_paths):
+    return [
+        f for f in file_paths
+        if f.lower().endswith((".rmd", ".qmd", ".r"))
+    ]
+
 def has_rmd_chunks(lines):
     return any(line.strip().startswith("```{") for line in lines)
 
@@ -171,7 +196,6 @@ def _process_r_chunk(chunk_code, metadata):
             "chunk": chunk_name if chunk_name else "__plain_code__"
         })
 
-
 #plain code parser / lines
 def process_plain_code(lines, metadata):
     body = "\n".join(lines)
@@ -207,7 +231,6 @@ def process_plain_code(lines, metadata):
         re.DOTALL
     ):
         metadata["calculated_columns"].append(m.group(0).strip())
-
 
     # ---------- FILTERS / ROW OPERATIONS ----------
     for f in re.finditer(
@@ -349,16 +372,36 @@ csv_path = os.path.join(
 )
 
 manifest_data = parse_manifest(manifest_path)
-rmd_metadata = parse_rmd(rmd_path)
+all_files = extract_files_from_manifest(manifest_data)
+r_source_files = filter_r_sources(all_files)
+
+all_rmd_metadata = {}
+
+for rel_path in r_source_files:
+    abs_path = os.path.join(
+        extract_path,
+        extracted_bundle_foldername,
+        rel_path
+    )
+
+    if not os.path.exists(abs_path):
+        continue
+
+    # reuse YOUR existing parser unchanged
+    all_rmd_metadata[rel_path] = parse_rmd(abs_path)
+
+print("---")
+print(all_files)
+print("---")
+# CSV stays as-is
 csv_metadata = analyze_csv(csv_path)
 
 final_metadata = {
     "manifest": manifest_data,
-    "report_metadata": rmd_metadata,
+    "report_metadata": all_rmd_metadata,
     "csv_column_metadata": csv_metadata
 }
 
 with open("final_metadata_output.json", "w", encoding="utf-8") as f:
     json.dump(final_metadata, f, indent=2)
-
-print("CREATED: final_metadata_output.json")
+    print("CREATED: final_metadata_output.json")
