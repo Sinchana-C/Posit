@@ -183,19 +183,28 @@ def _process_r_chunk(chunk_code, metadata):
     # Visuals
 
     for g in re.finditer(
-        r"""
-        ggplot\s*\(
-        [\s\S]*?(?=\n\s*\n
-            | \n\s*}
-            | \n\s*[A-Za-z_][A-Za-z0-9_]*\s*<-
-            | \n\s*```
-            | \Z
-        )
-        """,body,re.VERBOSE):
+        r"\b(plot|hist|boxplot|barplot|pairs|curve|dotchart)\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
         metadata["visuals"].append({
-            "type": "ggplot",
-            "snippet": g.group(0).strip(),
-            "chunk": chunk_name if chunk_name else "__plain_code__"
+            "type": "base_r_plot",
+            "snippet": g.group(0).strip()
+        })
+
+    for g in re.finditer(
+        r"\b(plot_ly|ggplotly)\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata["visuals"].append({
+            "type": "plotly",
+            "snippet": g.group(0).strip()
+        })
+
+    metadata.setdefault("code_blocks", []).append({
+    "context": "plain_code",
+    "code": body
         })
 
 #plain code parser / lines
@@ -219,7 +228,7 @@ def process_plain_code(lines, metadata):
             "raw": arg
         })
     
-    # ---------- CALCULATED / DERIVED COLUMNS ----------
+    # ---------- CALCULATED  COLUMNS ----------
     for m in re.finditer(
         r"\b("
         r"mutate|transmute|across|if_else|ifelse|case_when|"
@@ -266,7 +275,7 @@ def process_plain_code(lines, metadata):
         metadata["hierarchies"].append(g.group(0).strip())
 
 
-    # ---------- JOINS (TIDYVERSE + BASE R) ----------
+    # ---------- JOINS  ----------
     for j in re.finditer(
         r"\b("
         r"left_join|right_join|inner_join|full_join|merge"
@@ -276,24 +285,35 @@ def process_plain_code(lines, metadata):
     ):
         metadata["joins"].append(j.group(0).strip())
 
+    # ---------- PLOTS  ----------
+
     for g in re.finditer(
-        r"""
-        ggplot\s*\(
-        [\s\S]*?(?=\n\s*\n
-            | \n\s*}
-            | \n\s*[A-Za-z_][A-Za-z0-9_]*\s*<-
-            | \n\s*```
-            | \Z
-        )
-        """,body,re.VERBOSE):
+        r"\b(plot|hist|boxplot|barplot|pairs|curve|dotchart)\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
         metadata["visuals"].append({
-            "type": "ggplot",
-            "snippet": g.group(0).strip(),
+            "type": "base_r_plot",
+            "snippet": g.group(0).strip()
+        })
+
+    for g in re.finditer(
+        r"\b(plot_ly|ggplotly)\s*\(([^)]*)\)",
+        body,
+        re.DOTALL
+    ):
+        metadata["visuals"].append({
+            "type": "plotly",
+            "snippet": g.group(0).strip()
+        })
+        
+    metadata.setdefault("code_blocks", []).append({
+    "context": "plain_code",
+    "code": body
         })
 
 def parse_rmd(rmd_path):
     metadata = defaultdict(list)
-
     for k in [
         "chunks",
         "libraries",
@@ -341,7 +361,6 @@ def parse_rmd(rmd_path):
     return dict(metadata)
 
 # CSV ANALYSIS
-
 def analyze_csv(csv_path):
     df = pd.read_csv(csv_path)
     return [
@@ -352,7 +371,6 @@ def analyze_csv(csv_path):
         }
         for c in df.columns
     ]
-
 
 manifest_path = os.path.join(
     extract_path,
@@ -376,27 +394,19 @@ csv_path = os.path.join(
 manifest_data = parse_manifest(manifest_path)
 all_files = extract_files_from_manifest(manifest_data)
 r_source_files = filter_r_sources(all_files)
+csv_metadata = analyze_csv(csv_path)
 
 all_rmd_metadata = {}
 
 for rel_path in r_source_files:
-    abs_path = os.path.join(
-        extract_path,
-        extracted_bundle_foldername,
-        rel_path
-    )
-    print(abs_path)
-
+    abs_path = os.path.join(extract_path,extracted_bundle_foldername,rel_path)
     if not os.path.exists(abs_path):
         continue
-
     all_rmd_metadata[rel_path] = parse_rmd(abs_path)
 
 # print("---")
 # print(all_files)
 # print("---")
-
-csv_metadata = analyze_csv(csv_path)
 
 final_metadata = {
     "manifest": manifest_data,
